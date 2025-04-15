@@ -30,7 +30,7 @@ from xarray import (
     broadcast,
     set_options,
 )
-from xarray.coding.times import CFDatetimeCoder
+from xarray.coders import CFDatetimeCoder
 from xarray.core import dtypes
 from xarray.core.common import full_like
 from xarray.core.coordinates import Coordinates
@@ -48,6 +48,7 @@ from xarray.tests import (
     assert_identical,
     assert_no_warnings,
     has_dask,
+    has_dask_ge_2025_1_0,
     raise_if_dask_computes,
     requires_bottleneck,
     requires_cupy,
@@ -1791,12 +1792,12 @@ class TestDataArray:
         x = xr.DataArray([], dims=("x",), coords={"x": []}).astype("float32")
         y = x.reindex(x=[1.0, 2.0])
 
-        assert (
-            x.dtype == y.dtype
-        ), "Dtype of reindexed DataArray should match dtype of the original DataArray"
-        assert (
-            y.dtype == np.float32
-        ), "Dtype of reindexed DataArray should remain float32"
+        assert x.dtype == y.dtype, (
+            "Dtype of reindexed DataArray should match dtype of the original DataArray"
+        )
+        assert y.dtype == np.float32, (
+            "Dtype of reindexed DataArray should remain float32"
+        )
 
     def test_rename(self) -> None:
         da = xr.DataArray(
@@ -1906,6 +1907,21 @@ class TestDataArray:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             da.rename(x="x")
+
+    def test_replace(self) -> None:
+        # Tests the `attrs` replacement and whether it interferes with a
+        # `variable` replacement
+        da = self.mda
+        attrs1 = {"a1": "val1", "a2": 161}
+        x = np.ones((10, 20))
+        v = Variable(["x", "y"], x)
+        assert da._replace(variable=v, attrs=attrs1).attrs == attrs1
+        attrs2 = {"b1": "val2", "b2": 1312}
+        va = Variable(["x", "y"], x, attrs2)
+        # assuming passed `attrs` should prevail
+        assert da._replace(variable=va, attrs=attrs1).attrs == attrs1
+        # assuming `va.attrs` should be adopted
+        assert da._replace(variable=va).attrs == attrs2
 
     def test_init_value(self) -> None:
         expected = DataArray(
@@ -2990,8 +3006,11 @@ class TestDataArray:
 
     def test_drop_attrs(self) -> None:
         # Mostly tested in test_dataset.py, but adding a very small test here
-        da = DataArray([], attrs=dict(a=1, b=2))
+        coord_ = DataArray([], attrs=dict(d=3, e=4))
+        da = DataArray([], attrs=dict(a=1, b=2)).assign_coords(dict(coord_=coord_))
         assert da.drop_attrs().attrs == {}
+        assert da.drop_attrs().coord_.attrs == {}
+        assert da.drop_attrs(deep=False).coord_.attrs == dict(d=3, e=4)
 
     @pytest.mark.parametrize(
         "func", [lambda x: x.clip(0, 1), lambda x: np.float64(1.0) * x, np.abs, abs]
@@ -3437,7 +3456,7 @@ class TestDataArray:
 
     @requires_dask_expr
     @requires_dask
-    @pytest.mark.xfail(reason="dask-expr is broken")
+    @pytest.mark.xfail(not has_dask_ge_2025_1_0, reason="dask-expr is broken")
     def test_to_dask_dataframe(self) -> None:
         arr_np = np.arange(3 * 4).reshape(3, 4)
         arr = DataArray(arr_np, [("B", [1, 2, 3]), ("A", list("cdef"))], name="foo")
@@ -3661,7 +3680,6 @@ class TestDataArray:
         actual_no_data = da.to_dict(data=False, encoding=encoding)
         assert expected_no_data == actual_no_data
 
-    @pytest.mark.filterwarnings("ignore:Converting non-nanosecond")
     def test_to_and_from_dict_with_time_dim(self) -> None:
         x = np.random.randn(10, 3)
         t = pd.date_range("20130101", periods=10)
@@ -3670,7 +3688,6 @@ class TestDataArray:
         roundtripped = DataArray.from_dict(da.to_dict())
         assert_identical(da, roundtripped)
 
-    @pytest.mark.filterwarnings("ignore:Converting non-nanosecond")
     def test_to_and_from_dict_with_nan_nat(self) -> None:
         y = np.random.randn(10, 3)
         y[2] = np.nan
@@ -4583,16 +4600,18 @@ class TestDataArray:
         def exp_decay(t, n0, tau=1):
             return n0 * np.exp(-t / tau)
 
-        params, func_args = xr.core.dataset._get_func_args(exp_decay, [])
+        from xarray.computation.fit import _get_func_args, _initialize_curvefit_params
+
+        params, func_args = _get_func_args(exp_decay, [])
         assert params == ["n0", "tau"]
-        param_defaults, bounds_defaults = xr.core.dataset._initialize_curvefit_params(
+        param_defaults, bounds_defaults = _initialize_curvefit_params(
             params, {"n0": 4}, {"tau": [5, np.inf]}, func_args
         )
         assert param_defaults == {"n0": 4, "tau": 6}
         assert bounds_defaults == {"n0": (-np.inf, np.inf), "tau": (5, np.inf)}
 
         # DataArray as bound
-        param_defaults, bounds_defaults = xr.core.dataset._initialize_curvefit_params(
+        param_defaults, bounds_defaults = _initialize_curvefit_params(
             params=params,
             p0={"n0": 4},
             bounds={"tau": [DataArray([3, 4], coords=[("x", [1, 2])]), np.inf]},
@@ -4609,10 +4628,10 @@ class TestDataArray:
         assert bounds_defaults["tau"][1] == np.inf
 
         param_names = ["a"]
-        params, func_args = xr.core.dataset._get_func_args(np.power, param_names)
+        params, func_args = _get_func_args(np.power, param_names)
         assert params == param_names
         with pytest.raises(ValueError):
-            xr.core.dataset._get_func_args(np.power, [])
+            _get_func_args(np.power, [])
 
     @requires_scipy
     @pytest.mark.parametrize("use_dask", [True, False])
@@ -4949,7 +4968,15 @@ class TestReduce1D(TestReduce):
 
         assert_identical(result2, expected2)
 
-    @pytest.mark.parametrize("use_dask", [True, False])
+    @pytest.mark.parametrize(
+        "use_dask",
+        [
+            pytest.param(
+                True, marks=pytest.mark.skipif(not has_dask, reason="no dask")
+            ),
+            False,
+        ],
+    )
     def test_idxmin(
         self,
         x: np.ndarray,
@@ -4958,16 +4985,11 @@ class TestReduce1D(TestReduce):
         nanindex: int | None,
         use_dask: bool,
     ) -> None:
-        if use_dask and not has_dask:
-            pytest.skip("requires dask")
-        if use_dask and x.dtype.kind == "M":
-            pytest.xfail("dask operation 'argmin' breaks when dtype is datetime64 (M)")
         ar0_raw = xr.DataArray(
             x, dims=["x"], coords={"x": np.arange(x.size) * 4}, attrs=self.attrs
         )
-
         if use_dask:
-            ar0 = ar0_raw.chunk({})
+            ar0 = ar0_raw.chunk()
         else:
             ar0 = ar0_raw
 

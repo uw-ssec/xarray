@@ -191,7 +191,7 @@ To open format X file in xarray, you need to know the `format of the data <https
    :header: "File Format", "Open via", " Related Packages"
    :widths: 15, 45, 15
 
-   "NetCDF (.nc, .nc4, .cdf)","``open_dataset()`` OR ``open_mfdataset()``", "`netCDF4 <https://pypi.org/project/netCDF4/>`_, `netcdf <https://pypi.org/project/netcdf/>`_ , `cdms2 <https://cdms.readthedocs.io/en/latest/cdms2.html>`_"
+   "NetCDF (.nc, .nc4, .cdf)","``open_dataset()`` OR ``open_mfdataset()``", "`netCDF4 <https://pypi.org/project/netCDF4/>`_, `cdms2 <https://cdms.readthedocs.io/en/latest/cdms2.html>`_"
    "HDF5 (.h5, .hdf5)","``open_dataset()`` OR ``open_mfdataset()``", "`h5py <https://www.h5py.org/>`_, `pytables <https://www.pytables.org/>`_ "
    "GRIB (.grb, .grib)", "``open_dataset()``", "`cfgrib <https://pypi.org/project/cfgrib/>`_, `pygrib <https://pypi.org/project/pygrib/>`_"
    "CSV (.csv)","``open_dataset()``", "`pandas`_ , `dask <https://www.dask.org/>`_"
@@ -416,7 +416,19 @@ would certainly appreciate it. We recommend two citations.
                  url    = {https://doi.org/10.5281/zenodo.59499}
                 }
 
-.. _public api:
+.. _api-stability:
+
+How stable is Xarray's API?
+---------------------------
+
+Xarray tries very hard to maintain backwards compatibility in our :ref:`api` between released versions.
+Whilst we do occasionally make breaking changes in order to improve the library,
+we `signpost changes <https://docs.xarray.dev/en/stable/contributing.html#backwards-compatibility>`_ with ``DeprecationWarnings`` for many releases in advance.
+(An exception is bugs - whose behaviour we try to fix as soon as we notice them.)
+Our `test-driven development practices <https://docs.xarray.dev/en/stable/contributing.html#test-driven-development-code-writing>`_ helps to ensure any accidental regressions are caught.
+This philosophy applies to everything in the `public API <https://docs.xarray.dev/en/stable/getting-started-guide/faq.html#what-parts-of-xarray-are-considered-public-api>`_.
+
+.. _public-api:
 
 What parts of xarray are considered public API?
 -----------------------------------------------
